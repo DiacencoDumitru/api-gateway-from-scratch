@@ -75,3 +75,12 @@ For reliable comparisons, benchmark with fixed route mix, payload profiles, and 
 - Add circuit breaker and retry policies per route
 - Add configuration hot-reload for dynamic route updates
 - Add structured observability for filter-level latency breakdown
+
+## Benchmark Methodology
+
+For consistent gateway profiling, use:
+
+- Fixed route distribution and payload classes
+- Identical middleware chain per compared run
+- Separate no-upstream and upstream-included latency numbers
+- p50/p95/p99 latency with request error-rate reporting
