@@ -21,12 +21,18 @@ In microservice systems, cross-cutting concerns such as authentication, validati
 
 ```mermaid
 flowchart LR
-    Client["Client"] --> Gateway["API Gateway"]
-    Gateway --> Filters["Filter Chain"]
-    Filters --> RouteResolver["Route Resolver"]
-    RouteResolver --> Upstream["Upstream Services"]
-    Upstream --> ResponseFlow["Response Processing"]
-    ResponseFlow --> Client
+    Client["Client"] --> Gateway["API Gateway Entry"]
+    Gateway --> Auth["Auth Filter"]
+    Auth --> Validation["Validation Filter"]
+    Validation --> RateLimit["Rate Limit Filter"]
+    RateLimit --> RouteResolver["Route Resolver"]
+    RouteResolver --> Upstream["Target Service"]
+    Upstream --> Status{"Upstream Success?"}
+    Status -->|Yes| ResponseMap["Response Mapping"]
+    Status -->|No| Fallback["Error Mapping / Fallback"]
+    ResponseMap --> Logs["Audit Logs + Metrics"]
+    Fallback --> Logs
+    Logs --> Client
 ```
 
 ## How it works (high level)
