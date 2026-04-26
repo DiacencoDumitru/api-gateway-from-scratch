@@ -17,15 +17,27 @@ In microservice systems, cross-cutting concerns such as authentication, validati
 - Stateless processing for horizontal scaling
 - Pluggable middleware architecture
 
-## Architecture Overview
+## Architecture
 
-`Client -> Gateway Entry -> Filter Chain -> Route Resolver -> Upstream Service -> Response Filters -> Client`
+```mermaid
+flowchart LR
+    Client["Client"] --> Gateway["API Gateway"]
+    Gateway --> Filters["Filter Chain"]
+    Filters --> RouteResolver["Route Resolver"]
+    RouteResolver --> Upstream["Upstream Services"]
+    Upstream --> ResponseFlow["Response Processing"]
+    ResponseFlow --> Client
+```
 
-- Pre-routing filters apply global policies
-- Route resolver selects target upstream
-- Post-routing filters normalize response and telemetry
+## How it works (high level)
 
-## How It Works
+- Requests enter through the gateway entrypoint.
+- Pre-routing filters handle authentication, validation, logging, and rate limiting.
+- The route resolver selects the target upstream service.
+- Gateway forwards the request and processes the service response.
+- Response path applies standardized mapping and returns to the client.
+
+## How It Works (Detailed)
 
 ### Request Lifecycle
 
