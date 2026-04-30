@@ -102,3 +102,16 @@ For consistent gateway profiling, use:
 - Identical middleware chain per compared run
 - Separate no-upstream and upstream-included latency numbers
 - p50/p95/p99 latency with request error-rate reporting
+
+## Build and Run (Maven)
+
+Prerequisites:
+
+- Java 25
+- Maven 3.9+
+
+Commands:
+
+- Run unit-test phase (integration tests excluded by design): `mvn clean test`
+- Run full verification including integration tests: `mvn clean verify`
+- Start the application locally: `mvn spring-boot:run`
