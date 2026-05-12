@@ -149,3 +149,7 @@ After changing routes, run `mvn clean verify` to ensure integration tests still 
 ## Request correlation
 
 The gateway assigns a canonical **`X-Request-Id`** for every request: it reuses a non-empty client header (trimmed, max 128 characters) or generates a UUID. The same value is returned on the response and sent to upstreams for proxied routes. Run `mvn clean verify` after changes.
+
+## Operations / Health
+
+The application exposes **`GET /actuator/health`** (Spring Boot Actuator) with `{"status":"UP"}` for liveness-style checks. Only the health endpoint is published on the web port. After changing management settings, run `mvn clean verify`.
