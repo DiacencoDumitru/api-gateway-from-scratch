@@ -2,6 +2,8 @@ package com.dumitrudiacenco.apigatewayfromscratch.proxy;
 
 import com.dumitrudiacenco.apigatewayfromscratch.request.GatewayRequestAttributes;
 import com.dumitrudiacenco.apigatewayfromscratch.routing.RouteResolver;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -16,9 +18,12 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 @Component
@@ -53,10 +58,13 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
 
     private final RestClient restClient;
     private final RouteResolver routeResolver;
+    private final ObjectMapper objectMapper;
 
-    public UpstreamProxyFilter(RestClient.Builder restClientBuilder, RouteResolver routeResolver) {
+    public UpstreamProxyFilter(
+            RestClient.Builder restClientBuilder, RouteResolver routeResolver, ObjectMapper objectMapper) {
         this.restClient = restClientBuilder.build();
         this.routeResolver = routeResolver;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -103,13 +111,30 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
         var uriSpec = restClient.method(method).uri(upstream);
         var headersSpec = uriSpec.headers(headers -> copyRequestHeaders(request, headers, upstream));
 
-        ResponseEntity<byte[]> entity;
-        if (sendsBody(method) && body.length > 0) {
-            entity = headersSpec.body(body).retrieve().toEntity(byte[].class);
-        } else {
-            entity = headersSpec.retrieve().toEntity(byte[].class);
+        try {
+            ResponseEntity<byte[]> entity;
+            if (sendsBody(method) && body.length > 0) {
+                entity = headersSpec.body(body).exchange((req, res) -> readEntity(res));
+            } else {
+                entity = headersSpec.exchange((req, res) -> readEntity(res));
+            }
+            writeEntityResponse(response, entity, requestId);
+        } catch (RestClientException e) {
+            writeUpstreamUnreachable(response, requestId);
         }
+    }
 
+    private static ResponseEntity<byte[]> readEntity(ClientHttpResponse res) throws IOException {
+        try (res) {
+            HttpHeaders headers = new HttpHeaders();
+            headers.addAll(res.getHeaders());
+            byte[] responseBody = res.getBody().readAllBytes();
+            return ResponseEntity.status(res.getStatusCode()).headers(headers).body(responseBody);
+        }
+    }
+
+    private void writeEntityResponse(HttpServletResponse response, ResponseEntity<byte[]> entity, Object requestId)
+            throws IOException {
         response.setStatus(entity.getStatusCode().value());
         entity.getHeaders().forEach((name, values) -> {
             if (name == null || shouldStripResponseHeader(name)) {
@@ -127,6 +152,22 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
         if (requestId instanceof String id && !id.isBlank()) {
             response.setHeader(GatewayRequestAttributes.REQUEST_ID_HEADER, id);
         }
+    }
+
+    private void writeUpstreamUnreachable(HttpServletResponse response, Object requestId) throws IOException {
+        response.setStatus(HttpServletResponse.SC_BAD_GATEWAY);
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        if (requestId instanceof String id && !id.isBlank()) {
+            response.setHeader(GatewayRequestAttributes.REQUEST_ID_HEADER, id);
+        }
+        ObjectNode root = objectMapper.createObjectNode();
+        root.put("status", HttpServletResponse.SC_BAD_GATEWAY);
+        root.put("error", "upstream_unreachable");
+        if (requestId instanceof String id && !id.isBlank()) {
+            root.put("requestId", id);
+        }
+        byte[] bytes = objectMapper.writeValueAsBytes(root);
+        response.getOutputStream().write(bytes);
     }
 
     private static boolean sendsBody(HttpMethod method) {
