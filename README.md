@@ -132,6 +132,8 @@ gateway:
 
 With this configuration, `GET /api/users/1` is proxied to `GET http://localhost:8081/users/1`.
 
+Upstream responses keep their **HTTP status and body** (including 4xx and 5xx). If the upstream cannot be reached, the gateway responds with **502** and a JSON payload containing `status`, `error` (`upstream_unreachable`), and `requestId` when present.
+
 After changing routes, run `mvn clean verify` to ensure integration tests still pass.
 
 ## Request correlation
