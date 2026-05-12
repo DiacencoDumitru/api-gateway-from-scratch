@@ -1,0 +1,7 @@
+spring:
+  application:
+    name: api-gateway-from-scratch
+
+gateway:
+  routing:
+    routes: []

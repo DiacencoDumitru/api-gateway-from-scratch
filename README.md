@@ -115,3 +115,21 @@ Commands:
 - Run unit-test phase (integration tests excluded by design): `mvn clean test`
 - Run full verification including integration tests: `mvn clean verify`
 - Start the application locally: `mvn spring-boot:run`
+
+## Reverse proxy (YAML)
+
+Routes map a **path prefix** on the gateway to a **target base URL**. The longest matching prefix wins. The matched prefix is removed before the request is forwarded.
+
+Example `application.yml`:
+
+```yaml
+gateway:
+  routing:
+    routes:
+      - path-prefix: /api
+        target-base-url: http://localhost:8081
+```
+
+With this configuration, `GET /api/users/1` is proxied to `GET http://localhost:8081/users/1`.
+
+After changing routes, run `mvn clean verify` to ensure integration tests still pass.
