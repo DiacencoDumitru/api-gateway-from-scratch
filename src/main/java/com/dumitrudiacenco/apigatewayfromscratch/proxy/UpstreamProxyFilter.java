@@ -1,6 +1,6 @@
 package com.dumitrudiacenco.apigatewayfromscratch.proxy;
 
-import com.dumitrudiacenco.apigatewayfromscratch.routing.RouteMatch;
+import com.dumitrudiacenco.apigatewayfromscratch.request.GatewayRequestAttributes;
 import com.dumitrudiacenco.apigatewayfromscratch.routing.RouteResolver;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -36,7 +36,8 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
                     "transfer-encoding",
                     "upgrade",
                     "host",
-                    "content-length");
+                    "content-length",
+                    "x-request-id");
 
     private static final Set<String> HOP_RESPONSE =
             Set.of(
@@ -47,7 +48,8 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
                     "te",
                     "trailer",
                     "transfer-encoding",
-                    "upgrade");
+                    "upgrade",
+                    "x-request-id");
 
     private final RestClient restClient;
     private final RouteResolver routeResolver;
@@ -90,6 +92,11 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
     }
 
     private void proxy(HttpServletRequest request, HttpServletResponse response, URI upstream) throws IOException {
+        Object requestId = request.getAttribute(GatewayRequestAttributes.REQUEST_ID);
+        if (requestId instanceof String id && !id.isBlank()) {
+            response.setHeader(GatewayRequestAttributes.REQUEST_ID_HEADER, id);
+        }
+
         HttpMethod method = HttpMethod.valueOf(request.getMethod());
         byte[] body = request.getInputStream().readAllBytes();
 
@@ -115,6 +122,10 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
         byte[] responseBody = entity.getBody();
         if (responseBody != null && responseBody.length > 0) {
             response.getOutputStream().write(responseBody);
+        }
+
+        if (requestId instanceof String id && !id.isBlank()) {
+            response.setHeader(GatewayRequestAttributes.REQUEST_ID_HEADER, id);
         }
     }
 
@@ -144,6 +155,10 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
             }
         }
         target.put(HttpHeaders.HOST, Collections.singletonList(hostHeader(upstreamUri)));
+        Object requestId = request.getAttribute(GatewayRequestAttributes.REQUEST_ID);
+        if (requestId instanceof String id && !id.isBlank()) {
+            target.put(GatewayRequestAttributes.REQUEST_ID_HEADER, Collections.singletonList(id));
+        }
     }
 
     private static String hostHeader(URI uri) {
