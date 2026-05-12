@@ -10,13 +10,17 @@ import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMoc
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.dumitrudiacenco.apigatewayfromscratch.request.GatewayRequestAttributes;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.tomakehurst.wiremock.WireMockServer;
+import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -36,6 +40,10 @@ class UpstreamProxyIT {
     static void upstreamProperties(DynamicPropertyRegistry registry) {
         registry.add("gateway.routing.routes[0].path-prefix", () -> "/api");
         registry.add("gateway.routing.routes[0].target-base-url", () -> "http://localhost:" + WIRE_MOCK.port());
+        registry.add("gateway.routing.routes[1].path-prefix", () -> "/dead");
+        registry.add("gateway.routing.routes[1].target-base-url", () -> "http://127.0.0.1:1");
+        registry.add("gateway.upstream.http.read-timeout", () -> "1s");
+        registry.add("gateway.upstream.http.connect-timeout", () -> "2s");
     }
 
     @LocalServerPort
@@ -43,6 +51,9 @@ class UpstreamProxyIT {
 
     @Autowired
     RestClient.Builder restClientBuilder;
+
+    @Autowired
+    ObjectMapper objectMapper;
 
     @BeforeEach
     void resetWireMock() {
@@ -87,6 +98,49 @@ class UpstreamProxyIT {
     }
 
     @Test
+    void getForwardsUpstream503WithBody() {
+        WIRE_MOCK.stubFor(
+                get(urlEqualTo("/down")).willReturn(aResponse().withStatus(503).withBody("maintenance")));
+
+        RestClient client = restClientBuilder.baseUrl("http://localhost:" + port).build();
+        ResponseEntity<String> response = exchangeGet(client, "/api/down");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(503);
+        assertThat(response.getBody()).isEqualTo("maintenance");
+    }
+
+    @Test
+    void getReturns502JsonWhenUpstreamReadTimesOut() throws Exception {
+        WIRE_MOCK.stubFor(
+                get(urlEqualTo("/slow")).willReturn(aResponse().withStatus(200).withFixedDelay(3000)));
+
+        RestClient client = restClientBuilder.baseUrl("http://localhost:" + port).build();
+        ResponseEntity<String> response = exchangeGet(client, "/api/slow");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(502);
+        JsonNode node = objectMapper.readTree(response.getBody());
+        assertThat(node.path("status").asInt()).isEqualTo(502);
+        assertThat(node.path("error").asText()).isEqualTo("upstream_unreachable");
+        assertThat(node.path("requestId").asText()).isNotBlank();
+    }
+
+    @Test
+    void getReturns502JsonWhenUpstreamUnreachable() throws Exception {
+        RestClient client = restClientBuilder.baseUrl("http://localhost:" + port).build();
+        ResponseEntity<String> response = exchangeGet(client, "/dead/any");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(502);
+        assertThat(response.getHeaders().getContentType()).isNotNull();
+        assertThat(response.getHeaders().getContentType().toString()).contains("application/json");
+        JsonNode node = objectMapper.readTree(response.getBody());
+        assertThat(node.path("status").asInt()).isEqualTo(502);
+        assertThat(node.path("error").asText()).isEqualTo("upstream_unreachable");
+        assertThat(node.path("requestId").asText()).isNotBlank();
+        assertThat(response.getHeaders().getFirst(GatewayRequestAttributes.REQUEST_ID_HEADER))
+                .isEqualTo(node.path("requestId").asText());
+    }
+
+    @Test
     void postForwardsBodyToUpstream() {
         WIRE_MOCK.stubFor(
                 post(urlEqualTo("/echo"))
@@ -97,5 +151,18 @@ class UpstreamProxyIT {
         String body = client.post().uri("/api/echo").contentType(MediaType.TEXT_PLAIN).body("payload").retrieve().body(String.class);
 
         assertThat(body).isEqualTo("echoed");
+    }
+
+    private static ResponseEntity<String> exchangeGet(RestClient client, String path) {
+        return client.get()
+                .uri(path)
+                .exchange((request, res) -> {
+                    try (res) {
+                        HttpHeaders headers = new HttpHeaders();
+                        headers.addAll(res.getHeaders());
+                        String body = new String(res.getBody().readAllBytes(), StandardCharsets.UTF_8);
+                        return ResponseEntity.status(res.getStatusCode()).headers(headers).body(body);
+                    }
+                });
     }
 }

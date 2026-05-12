@@ -5,3 +5,7 @@ spring:
 gateway:
   routing:
     routes: []
+  upstream:
+    http:
+      connect-timeout: 5s
+      read-timeout: 30s

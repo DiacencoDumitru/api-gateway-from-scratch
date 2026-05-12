@@ -132,6 +132,18 @@ gateway:
 
 With this configuration, `GET /api/users/1` is proxied to `GET http://localhost:8081/users/1`.
 
+Upstream responses keep their **HTTP status and body** (including 4xx and 5xx). If the upstream cannot be reached, the gateway responds with **502** and a JSON payload containing `status`, `error` (`upstream_unreachable`), and `requestId` when present. The same **502** JSON is used when the upstream read exceeds **`gateway.upstream.http.read-timeout`** (and for other transport failures).
+
+Optional upstream HTTP client tuning:
+
+```yaml
+gateway:
+  upstream:
+    http:
+      connect-timeout: 5s
+      read-timeout: 30s
+```
+
 After changing routes, run `mvn clean verify` to ensure integration tests still pass.
 
 ## Request correlation
