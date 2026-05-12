@@ -42,6 +42,8 @@ class UpstreamProxyIT {
         registry.add("gateway.routing.routes[0].target-base-url", () -> "http://localhost:" + WIRE_MOCK.port());
         registry.add("gateway.routing.routes[1].path-prefix", () -> "/dead");
         registry.add("gateway.routing.routes[1].target-base-url", () -> "http://127.0.0.1:1");
+        registry.add("gateway.upstream.http.read-timeout", () -> "1s");
+        registry.add("gateway.upstream.http.connect-timeout", () -> "2s");
     }
 
     @LocalServerPort
@@ -105,6 +107,21 @@ class UpstreamProxyIT {
 
         assertThat(response.getStatusCode().value()).isEqualTo(503);
         assertThat(response.getBody()).isEqualTo("maintenance");
+    }
+
+    @Test
+    void getReturns502JsonWhenUpstreamReadTimesOut() throws Exception {
+        WIRE_MOCK.stubFor(
+                get(urlEqualTo("/slow")).willReturn(aResponse().withStatus(200).withFixedDelay(3000)));
+
+        RestClient client = restClientBuilder.baseUrl("http://localhost:" + port).build();
+        ResponseEntity<String> response = exchangeGet(client, "/api/slow");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(502);
+        JsonNode node = objectMapper.readTree(response.getBody());
+        assertThat(node.path("status").asInt()).isEqualTo(502);
+        assertThat(node.path("error").asText()).isEqualTo("upstream_unreachable");
+        assertThat(node.path("requestId").asText()).isNotBlank();
     }
 
     @Test

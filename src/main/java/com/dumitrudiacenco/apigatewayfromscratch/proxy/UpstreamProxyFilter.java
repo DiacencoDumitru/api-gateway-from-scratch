@@ -1,5 +1,6 @@
 package com.dumitrudiacenco.apigatewayfromscratch.proxy;
 
+import com.dumitrudiacenco.apigatewayfromscratch.config.GatewayUpstreamRestClientConfiguration;
 import com.dumitrudiacenco.apigatewayfromscratch.request.GatewayRequestAttributes;
 import com.dumitrudiacenco.apigatewayfromscratch.routing.RouteResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,6 +15,7 @@ import java.util.Collections;
 import java.util.Enumeration;
 import java.util.Locale;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpHeaders;
@@ -61,8 +63,10 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
     private final ObjectMapper objectMapper;
 
     public UpstreamProxyFilter(
-            RestClient.Builder restClientBuilder, RouteResolver routeResolver, ObjectMapper objectMapper) {
-        this.restClient = restClientBuilder.build();
+            @Qualifier(GatewayUpstreamRestClientConfiguration.GATEWAY_UPSTREAM_REST_CLIENT) RestClient restClient,
+            RouteResolver routeResolver,
+            ObjectMapper objectMapper) {
+        this.restClient = restClient;
         this.routeResolver = routeResolver;
         this.objectMapper = objectMapper;
     }
