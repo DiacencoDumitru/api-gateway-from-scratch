@@ -133,3 +133,7 @@ gateway:
 With this configuration, `GET /api/users/1` is proxied to `GET http://localhost:8081/users/1`.
 
 After changing routes, run `mvn clean verify` to ensure integration tests still pass.
+
+## Request correlation
+
+The gateway assigns a canonical **`X-Request-Id`** for every request: it reuses a non-empty client header (trimmed, max 128 characters) or generates a UUID. The same value is returned on the response and sent to upstreams for proxied routes. Run `mvn clean verify` after changes.

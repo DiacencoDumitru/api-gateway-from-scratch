@@ -3,11 +3,13 @@ package com.dumitrudiacenco.apigatewayfromscratch;
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.dumitrudiacenco.apigatewayfromscratch.request.GatewayRequestAttributes;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.web.client.RestClient;
@@ -57,9 +60,30 @@ class UpstreamProxyIT {
                 get(urlEqualTo("/hello")).willReturn(aResponse().withStatus(200).withBody("world")));
 
         RestClient client = restClientBuilder.baseUrl("http://localhost:" + port).build();
-        String body = client.get().uri("/api/hello").retrieve().body(String.class);
+        ResponseEntity<String> response =
+                client.get().uri("/api/hello").retrieve().toEntity(String.class);
 
-        assertThat(body).isEqualTo("world");
+        assertThat(response.getBody()).isEqualTo("world");
+        String requestId = response.getHeaders().getFirst(GatewayRequestAttributes.REQUEST_ID_HEADER);
+        assertThat(requestId).isNotBlank();
+        WIRE_MOCK.verify(getRequestedFor(urlEqualTo("/hello")).withHeader(GatewayRequestAttributes.REQUEST_ID_HEADER, equalTo(requestId)));
+    }
+
+    @Test
+    void getUsesClientRequestIdForUpstreamAndResponse() {
+        WIRE_MOCK.stubFor(get(urlEqualTo("/ping")).willReturn(aResponse().withStatus(200).withBody("pong")));
+
+        RestClient client = restClientBuilder.baseUrl("http://localhost:" + port).build();
+        String clientId = "client-req-1";
+        ResponseEntity<String> response = client.get()
+                .uri("/api/ping")
+                .header(GatewayRequestAttributes.REQUEST_ID_HEADER, clientId)
+                .retrieve()
+                .toEntity(String.class);
+
+        assertThat(response.getBody()).isEqualTo("pong");
+        assertThat(response.getHeaders().getFirst(GatewayRequestAttributes.REQUEST_ID_HEADER)).isEqualTo(clientId);
+        WIRE_MOCK.verify(getRequestedFor(urlEqualTo("/ping")).withHeader(GatewayRequestAttributes.REQUEST_ID_HEADER, equalTo(clientId)));
     }
 
     @Test
