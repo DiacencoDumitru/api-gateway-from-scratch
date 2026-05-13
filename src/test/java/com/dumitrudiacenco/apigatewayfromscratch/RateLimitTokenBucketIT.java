@@ -7,6 +7,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.dumitrudiacenco.apigatewayfromscratch.ratelimit.RouteTokenBuckets;
 import com.dumitrudiacenco.apigatewayfromscratch.resilience.RouteCircuitBreakers;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -26,7 +27,7 @@ import org.springframework.web.client.RestClient;
 import java.nio.charset.StandardCharsets;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class CircuitBreakerIT {
+class RateLimitTokenBucketIT {
 
     private static final WireMockServer WIRE_MOCK = new WireMockServer(wireMockConfig().dynamicPort());
 
@@ -38,8 +39,8 @@ class CircuitBreakerIT {
     static void upstreamProperties(DynamicPropertyRegistry registry) {
         registry.add("gateway.routing.routes[0].path-prefix", () -> "/api");
         registry.add("gateway.routing.routes[0].target-base-url", () -> "http://localhost:" + WIRE_MOCK.port());
-        registry.add("gateway.routing.routes[0].circuit-breaker-failure-threshold", () -> "2");
-        registry.add("gateway.routing.routes[0].circuit-breaker-open-wait-millis", () -> "500");
+        registry.add("gateway.routing.routes[0].rate-limit-burst", () -> "2");
+        registry.add("gateway.routing.routes[0].rate-limit-refill-millis", () -> "60000");
         registry.add("gateway.upstream.http.read-timeout", () -> "2s");
         registry.add("gateway.upstream.http.connect-timeout", () -> "2s");
     }
@@ -56,10 +57,14 @@ class CircuitBreakerIT {
     @Autowired
     RouteCircuitBreakers circuitBreakers;
 
+    @Autowired
+    RouteTokenBuckets routeTokenBuckets;
+
     @BeforeEach
     void resetWireMock() {
         WIRE_MOCK.resetAll();
         circuitBreakers.resetAll();
+        routeTokenBuckets.resetAll();
     }
 
     @AfterAll
@@ -68,23 +73,23 @@ class CircuitBreakerIT {
     }
 
     @Test
-    void shouldOpenCircuitAfterRepeatedUpstreamFailures() throws Exception {
-        WIRE_MOCK.stubFor(get(urlEqualTo("/cb-down")).willReturn(aResponse().withStatus(500).withBody("err")));
+    void shouldRejectExcessRequestsWithoutCallingUpstream() throws Exception {
+        WIRE_MOCK.stubFor(get(urlEqualTo("/rl-ok")).willReturn(aResponse().withStatus(200).withBody("ok")));
 
         RestClient client = restClientBuilder.baseUrl("http://localhost:" + port).build();
 
-        ResponseEntity<String> first = exchangeGet(client, "/api/cb-down");
-        assertThat(first.getStatusCode().value()).isEqualTo(500);
+        ResponseEntity<String> first = exchangeGet(client, "/api/rl-ok");
+        assertThat(first.getStatusCode().value()).isEqualTo(200);
 
-        ResponseEntity<String> second = exchangeGet(client, "/api/cb-down");
-        assertThat(second.getStatusCode().value()).isEqualTo(500);
+        ResponseEntity<String> second = exchangeGet(client, "/api/rl-ok");
+        assertThat(second.getStatusCode().value()).isEqualTo(200);
 
-        ResponseEntity<String> third = exchangeGet(client, "/api/cb-down");
-        assertThat(third.getStatusCode().value()).isEqualTo(503);
+        ResponseEntity<String> third = exchangeGet(client, "/api/rl-ok");
+        assertThat(third.getStatusCode().value()).isEqualTo(429);
         JsonNode body = objectMapper.readTree(third.getBody());
-        assertThat(body.path("error").asText()).isEqualTo("circuit_open");
+        assertThat(body.path("error").asText()).isEqualTo("rate_limited");
 
-        WIRE_MOCK.verify(2, getRequestedFor(urlEqualTo("/cb-down")));
+        WIRE_MOCK.verify(2, getRequestedFor(urlEqualTo("/rl-ok")));
     }
 
     private static ResponseEntity<String> exchangeGet(RestClient client, String path) {

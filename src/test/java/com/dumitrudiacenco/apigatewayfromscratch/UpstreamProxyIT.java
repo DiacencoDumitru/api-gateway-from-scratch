@@ -5,9 +5,6 @@ import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
-import static com.github.tomakehurst.wiremock.client.WireMock.inScenario;
-import static com.github.tomakehurst.wiremock.client.WireMock.WIREMOCK_SCENARIO_STARTED;
-import static com.github.tomakehurst.wiremock.client.WireMock.willSetStateTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -16,6 +13,7 @@ import com.dumitrudiacenco.apigatewayfromscratch.request.GatewayRequestAttribute
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.tomakehurst.wiremock.WireMockServer;
+import com.github.tomakehurst.wiremock.stubbing.Scenario;
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -161,7 +159,7 @@ class UpstreamProxyIT {
     void getRetriesAndSucceedsOnSecondAttempt() {
         WIRE_MOCK.stubFor(get(urlEqualTo("/flaky"))
                 .inScenario("retry-flow")
-                .whenScenarioStateIs(WIREMOCK_SCENARIO_STARTED)
+                .whenScenarioStateIs(Scenario.STARTED)
                 .willReturn(aResponse().withStatus(503).withBody("temporary"))
                 .willSetStateTo("recovered"));
         WIRE_MOCK.stubFor(get(urlEqualTo("/flaky"))

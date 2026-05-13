@@ -3,6 +3,8 @@ package com.dumitrudiacenco.apigatewayfromscratch.proxy;
 import com.dumitrudiacenco.apigatewayfromscratch.config.GatewayUpstreamRestClientConfiguration;
 import com.dumitrudiacenco.apigatewayfromscratch.request.GatewayRequestAttributes;
 import com.dumitrudiacenco.apigatewayfromscratch.resilience.RouteCircuitBreakers;
+import com.dumitrudiacenco.apigatewayfromscratch.ratelimit.RouteTokenBuckets;
+import com.dumitrudiacenco.apigatewayfromscratch.ratelimit.RouteTokenBuckets.TryResult;
 import com.dumitrudiacenco.apigatewayfromscratch.routing.RouteMatch;
 import com.dumitrudiacenco.apigatewayfromscratch.routing.RouteResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -24,6 +26,7 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.ClientHttpResponse;
@@ -67,18 +70,21 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
     private final RouteCircuitBreakers circuitBreakers;
+    private final RouteTokenBuckets routeTokenBuckets;
 
     public UpstreamProxyFilter(
             @Qualifier(GatewayUpstreamRestClientConfiguration.GATEWAY_UPSTREAM_REST_CLIENT) RestClient restClient,
             RouteResolver routeResolver,
             ObjectMapper objectMapper,
             MeterRegistry meterRegistry,
-            RouteCircuitBreakers circuitBreakers) {
+            RouteCircuitBreakers circuitBreakers,
+            RouteTokenBuckets routeTokenBuckets) {
         this.restClient = restClient;
         this.routeResolver = routeResolver;
         this.objectMapper = objectMapper;
         this.meterRegistry = meterRegistry;
         this.circuitBreakers = circuitBreakers;
+        this.routeTokenBuckets = routeTokenBuckets;
     }
 
     @Override
@@ -126,6 +132,20 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
         String routeKey = routeMatch.routeKey();
         int failureThreshold = routeMatch.circuitBreakerFailureThreshold();
         long openWaitMillis = routeMatch.circuitBreakerOpenWaitMillis();
+
+        String bucketKey = routeKey + "|" + clientKey(request);
+        TryResult rateLimit = routeTokenBuckets.tryConsume(
+                bucketKey,
+                routeMatch.rateLimitBurst(),
+                routeMatch.rateLimitRefillMillis());
+        if (!rateLimit.allowed()) {
+            writeRateLimited(response, requestId, rateLimit.retryAfterSeconds());
+            recordProxyMetrics(method, HttpStatus.TOO_MANY_REQUESTS.value(), "rate_limited");
+            sample.stop(Timer.builder("gateway.proxy.request.duration")
+                    .tag("method", method.name())
+                    .register(meterRegistry));
+            return;
+        }
 
         if (!circuitBreakers.allowRequest(routeKey, failureThreshold, openWaitMillis)) {
             writeCircuitOpen(response, requestId, openWaitMillis);
@@ -256,6 +276,36 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
         }
         byte[] bytes = objectMapper.writeValueAsBytes(root);
         response.getOutputStream().write(bytes);
+    }
+
+    private void writeRateLimited(HttpServletResponse response, Object requestId, long retryAfterSeconds) throws IOException {
+        int status = HttpStatus.TOO_MANY_REQUESTS.value();
+        response.setStatus(status);
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setHeader(HttpHeaders.RETRY_AFTER, String.valueOf(retryAfterSeconds));
+        if (requestId instanceof String id && !id.isBlank()) {
+            response.setHeader(GatewayRequestAttributes.REQUEST_ID_HEADER, id);
+        }
+        ObjectNode root = objectMapper.createObjectNode();
+        root.put("status", status);
+        root.put("error", "rate_limited");
+        root.put("retryAfterSeconds", retryAfterSeconds);
+        if (requestId instanceof String id && !id.isBlank()) {
+            root.put("requestId", id);
+        }
+        byte[] bytes = objectMapper.writeValueAsBytes(root);
+        response.getOutputStream().write(bytes);
+    }
+
+    private static String clientKey(HttpServletRequest request) {
+        String forwarded = request.getHeader("X-Forwarded-For");
+        if (forwarded != null && !forwarded.isBlank()) {
+            int comma = forwarded.indexOf(',');
+            String first = comma < 0 ? forwarded.trim() : forwarded.substring(0, comma).trim();
+            return first.isEmpty() ? "unknown" : first;
+        }
+        String remote = request.getRemoteAddr();
+        return remote == null || remote.isBlank() ? "unknown" : remote;
     }
 
     private static boolean sendsBody(HttpMethod method) {

@@ -7,5 +7,7 @@ public record RouteMatch(
         int retryAttempts,
         int circuitBreakerFailureThreshold,
         long circuitBreakerOpenWaitMillis,
-        String routeKey
+        String routeKey,
+        int rateLimitBurst,
+        long rateLimitRefillMillis
 ) {}
