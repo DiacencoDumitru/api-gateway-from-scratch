@@ -86,7 +86,7 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
             return;
         }
         URI upstream = withQuery(match.get().upstreamUri(), request.getQueryString());
-        proxy(request, response, upstream);
+        proxy(request, response, upstream, match.get().retryAttempts());
     }
 
     private static String requestPath(HttpServletRequest request) {
@@ -108,7 +108,7 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
         return URI.create(upstream.toASCIIString() + "?" + rawQuery);
     }
 
-    private void proxy(HttpServletRequest request, HttpServletResponse response, URI upstream) throws IOException {
+    private void proxy(HttpServletRequest request, HttpServletResponse response, URI upstream, int retryAttempts) throws IOException {
         Timer.Sample sample = Timer.start(meterRegistry);
         Object requestId = request.getAttribute(GatewayRequestAttributes.REQUEST_ID);
         if (requestId instanceof String id && !id.isBlank()) {
@@ -121,18 +121,35 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
         var uriSpec = restClient.method(method).uri(upstream);
         var headersSpec = uriSpec.headers(headers -> copyRequestHeaders(request, headers, upstream));
 
-        try {
-            ResponseEntity<byte[]> entity;
-            if (sendsBody(method) && body.length > 0) {
-                entity = headersSpec.body(body).exchange((req, res) -> readEntity(res));
-            } else {
-                entity = headersSpec.exchange((req, res) -> readEntity(res));
+        int attempts = shouldRetry(method) ? Math.max(1, retryAttempts) : 1;
+        RestClientException lastFailure = null;
+        ResponseEntity<byte[]> entity = null;
+        for (int attempt = 1; attempt <= attempts; attempt++) {
+            try {
+                if (sendsBody(method) && body.length > 0) {
+                    entity = headersSpec.body(body).exchange((req, res) -> readEntity(res));
+                } else {
+                    entity = headersSpec.exchange((req, res) -> readEntity(res));
+                }
+                if (entity.getStatusCode().is5xxServerError() && attempt < attempts) {
+                    continue;
+                }
+                break;
+            } catch (RestClientException ex) {
+                lastFailure = ex;
+                if (attempt == attempts) {
+                    break;
+                }
             }
-            writeEntityResponse(response, entity, requestId);
-            recordProxyMetrics(method, entity.getStatusCode().value(), "upstream");
-        } catch (RestClientException e) {
-            writeUpstreamUnreachable(response, requestId);
-            recordProxyMetrics(method, HttpServletResponse.SC_BAD_GATEWAY, "unreachable");
+        }
+        try {
+            if (entity != null) {
+                writeEntityResponse(response, entity, requestId);
+                recordProxyMetrics(method, entity.getStatusCode().value(), "upstream");
+            } else if (lastFailure != null) {
+                writeUpstreamUnreachable(response, requestId);
+                recordProxyMetrics(method, HttpServletResponse.SC_BAD_GATEWAY, "unreachable");
+            }
         } finally {
             sample.stop(Timer.builder("gateway.proxy.request.duration")
                     .tag("method", method.name())
@@ -197,6 +214,10 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
 
     private static boolean sendsBody(HttpMethod method) {
         return method == HttpMethod.POST || method == HttpMethod.PUT || method == HttpMethod.PATCH;
+    }
+
+    private static boolean shouldRetry(HttpMethod method) {
+        return method == HttpMethod.GET || method == HttpMethod.HEAD;
     }
 
     private static void copyRequestHeaders(HttpServletRequest request, HttpHeaders target, URI upstreamUri) {

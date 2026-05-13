@@ -5,6 +5,9 @@ import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
+import static com.github.tomakehurst.wiremock.client.WireMock.inScenario;
+import static com.github.tomakehurst.wiremock.client.WireMock.WIREMOCK_SCENARIO_STARTED;
+import static com.github.tomakehurst.wiremock.client.WireMock.willSetStateTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -40,6 +43,7 @@ class UpstreamProxyIT {
     static void upstreamProperties(DynamicPropertyRegistry registry) {
         registry.add("gateway.routing.routes[0].path-prefix", () -> "/api");
         registry.add("gateway.routing.routes[0].target-base-url", () -> "http://localhost:" + WIRE_MOCK.port());
+        registry.add("gateway.routing.routes[0].retry-attempts", () -> "2");
         registry.add("gateway.routing.routes[1].path-prefix", () -> "/dead");
         registry.add("gateway.routing.routes[1].target-base-url", () -> "http://127.0.0.1:1");
         registry.add("gateway.upstream.http.read-timeout", () -> "1s");
@@ -151,6 +155,26 @@ class UpstreamProxyIT {
         String body = client.post().uri("/api/echo").contentType(MediaType.TEXT_PLAIN).body("payload").retrieve().body(String.class);
 
         assertThat(body).isEqualTo("echoed");
+    }
+
+    @Test
+    void getRetriesAndSucceedsOnSecondAttempt() {
+        WIRE_MOCK.stubFor(get(urlEqualTo("/flaky"))
+                .inScenario("retry-flow")
+                .whenScenarioStateIs(WIREMOCK_SCENARIO_STARTED)
+                .willReturn(aResponse().withStatus(503).withBody("temporary"))
+                .willSetStateTo("recovered"));
+        WIRE_MOCK.stubFor(get(urlEqualTo("/flaky"))
+                .inScenario("retry-flow")
+                .whenScenarioStateIs("recovered")
+                .willReturn(aResponse().withStatus(200).withBody("ok-after-retry")));
+
+        RestClient client = restClientBuilder.baseUrl("http://localhost:" + port).build();
+        ResponseEntity<String> response = exchangeGet(client, "/api/flaky");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(response.getBody()).isEqualTo("ok-after-retry");
+        WIRE_MOCK.verify(2, getRequestedFor(urlEqualTo("/flaky")));
     }
 
     private static ResponseEntity<String> exchangeGet(RestClient client, String path) {

@@ -21,6 +21,7 @@ public class GatewayRoutingProperties {
 
         private String pathPrefix;
         private String targetBaseUrl;
+        private Integer retryAttempts;
 
         public String getPathPrefix() {
             return pathPrefix;
@@ -36,6 +37,14 @@ public class GatewayRoutingProperties {
 
         public void setTargetBaseUrl(String targetBaseUrl) {
             this.targetBaseUrl = targetBaseUrl;
+        }
+
+        public Integer getRetryAttempts() {
+            return retryAttempts;
+        }
+
+        public void setRetryAttempts(Integer retryAttempts) {
+            this.retryAttempts = retryAttempts;
         }
     }
 }
