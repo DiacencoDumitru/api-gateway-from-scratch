@@ -24,6 +24,8 @@ public class GatewayRoutingProperties {
         private Integer retryAttempts;
         private Integer circuitBreakerFailureThreshold;
         private Long circuitBreakerOpenWaitMillis;
+        private Integer rateLimitBurst;
+        private Long rateLimitRefillMillis;
 
         public String getPathPrefix() {
             return pathPrefix;
@@ -63,6 +65,22 @@ public class GatewayRoutingProperties {
 
         public void setCircuitBreakerOpenWaitMillis(Long circuitBreakerOpenWaitMillis) {
             this.circuitBreakerOpenWaitMillis = circuitBreakerOpenWaitMillis;
+        }
+
+        public Integer getRateLimitBurst() {
+            return rateLimitBurst;
+        }
+
+        public void setRateLimitBurst(Integer rateLimitBurst) {
+            this.rateLimitBurst = rateLimitBurst;
+        }
+
+        public Long getRateLimitRefillMillis() {
+            return rateLimitRefillMillis;
+        }
+
+        public void setRateLimitRefillMillis(Long rateLimitRefillMillis) {
+            this.rateLimitRefillMillis = rateLimitRefillMillis;
         }
     }
 }

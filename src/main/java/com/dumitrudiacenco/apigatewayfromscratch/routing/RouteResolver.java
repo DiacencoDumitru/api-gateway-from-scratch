@@ -30,8 +30,22 @@ public final class RouteResolver {
                         route.getCircuitBreakerOpenWaitMillis() != null && route.getCircuitBreakerOpenWaitMillis() > 0
                                 ? route.getCircuitBreakerOpenWaitMillis()
                                 : 0L;
+                int rateLimitBurst =
+                        route.getRateLimitBurst() != null && route.getRateLimitBurst() > 0 ? route.getRateLimitBurst() : 0;
+                long rateLimitRefillMillis =
+                        route.getRateLimitRefillMillis() != null && route.getRateLimitRefillMillis() > 0
+                                ? route.getRateLimitRefillMillis()
+                                : 0L;
                 String routeKey = prefix + "|" + base;
-                list.add(new ResolvedRoute(prefix, base, retryAttempts, failureThreshold, openWaitMillis, routeKey));
+                list.add(new ResolvedRoute(
+                        prefix,
+                        base,
+                        retryAttempts,
+                        failureThreshold,
+                        openWaitMillis,
+                        routeKey,
+                        rateLimitBurst,
+                        rateLimitRefillMillis));
             }
         }
         list.sort(Comparator.comparingInt(r -> -r.pathPrefix().length()));
@@ -53,7 +67,9 @@ public final class RouteResolver {
                         route.retryAttempts(),
                         route.circuitBreakerFailureThreshold(),
                         route.circuitBreakerOpenWaitMillis(),
-                        route.routeKey()));
+                        route.routeKey(),
+                        route.rateLimitBurst(),
+                        route.rateLimitRefillMillis()));
             }
         }
         return Optional.empty();
@@ -105,6 +121,8 @@ public final class RouteResolver {
             int retryAttempts,
             int circuitBreakerFailureThreshold,
             long circuitBreakerOpenWaitMillis,
-            String routeKey
+            String routeKey,
+            int rateLimitBurst,
+            long rateLimitRefillMillis
     ) {}
 }
