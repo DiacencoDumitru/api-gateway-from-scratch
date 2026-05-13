@@ -1,6 +1,7 @@
 package com.dumitrudiacenco.apigatewayfromscratch.config;
 
-import com.dumitrudiacenco.apigatewayfromscratch.routing.RouteResolver;
+import com.dumitrudiacenco.apigatewayfromscratch.actuator.GatewayRoutesEndpoint;
+import com.dumitrudiacenco.apigatewayfromscratch.routing.RefreshableRouteResolver;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -10,7 +11,7 @@ import org.springframework.context.annotation.Configuration;
 public class GatewayRoutingConfiguration {
 
     @Bean
-    RouteResolver routeResolver(GatewayRoutingProperties properties) {
-        return new RouteResolver(properties.getRoutes());
+    GatewayRoutesEndpoint gatewayRoutesEndpoint(RefreshableRouteResolver refreshableRouteResolver) {
+        return new GatewayRoutesEndpoint(refreshableRouteResolver);
     }
 }

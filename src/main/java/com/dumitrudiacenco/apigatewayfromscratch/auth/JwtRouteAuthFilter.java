@@ -1,8 +1,8 @@
 package com.dumitrudiacenco.apigatewayfromscratch.auth;
 
 import com.dumitrudiacenco.apigatewayfromscratch.request.GatewayRequestAttributes;
+import com.dumitrudiacenco.apigatewayfromscratch.routing.RefreshableRouteResolver;
 import com.dumitrudiacenco.apigatewayfromscratch.routing.RouteMatch;
-import com.dumitrudiacenco.apigatewayfromscratch.routing.RouteResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.nimbusds.jose.JOSEException;
@@ -34,10 +34,10 @@ public class JwtRouteAuthFilter extends OncePerRequestFilter {
 
     private static final String BEARER_PREFIX = "bearer ";
 
-    private final RouteResolver routeResolver;
+    private final RefreshableRouteResolver routeResolver;
     private final ObjectMapper objectMapper;
 
-    public JwtRouteAuthFilter(RouteResolver routeResolver, ObjectMapper objectMapper) {
+    public JwtRouteAuthFilter(RefreshableRouteResolver routeResolver, ObjectMapper objectMapper) {
         this.routeResolver = routeResolver;
         this.objectMapper = objectMapper;
     }

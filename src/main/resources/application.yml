@@ -6,7 +6,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,metrics
+        include: health,metrics,gatewayroutes
   endpoint:
     health:
       show-details: never
