@@ -9,5 +9,6 @@ public record RouteMatch(
         long circuitBreakerOpenWaitMillis,
         String routeKey,
         int rateLimitBurst,
-        long rateLimitRefillMillis
+        long rateLimitRefillMillis,
+        String jwtHs256Secret
 ) {}

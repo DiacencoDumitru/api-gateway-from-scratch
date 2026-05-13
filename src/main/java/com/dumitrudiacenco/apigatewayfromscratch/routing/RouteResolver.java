@@ -36,6 +36,13 @@ public final class RouteResolver {
                         route.getRateLimitRefillMillis() != null && route.getRateLimitRefillMillis() > 0
                                 ? route.getRateLimitRefillMillis()
                                 : 0L;
+                String jwtHs256Secret = null;
+                if (route.getJwtHs256Secret() != null) {
+                    String trimmed = route.getJwtHs256Secret().trim();
+                    if (!trimmed.isEmpty()) {
+                        jwtHs256Secret = trimmed;
+                    }
+                }
                 String routeKey = prefix + "|" + base;
                 list.add(new ResolvedRoute(
                         prefix,
@@ -45,7 +52,8 @@ public final class RouteResolver {
                         openWaitMillis,
                         routeKey,
                         rateLimitBurst,
-                        rateLimitRefillMillis));
+                        rateLimitRefillMillis,
+                        jwtHs256Secret));
             }
         }
         list.sort(Comparator.comparingInt(r -> -r.pathPrefix().length()));
@@ -69,7 +77,8 @@ public final class RouteResolver {
                         route.circuitBreakerOpenWaitMillis(),
                         route.routeKey(),
                         route.rateLimitBurst(),
-                        route.rateLimitRefillMillis()));
+                        route.rateLimitRefillMillis(),
+                        route.jwtHs256Secret()));
             }
         }
         return Optional.empty();
@@ -123,6 +132,7 @@ public final class RouteResolver {
             long circuitBreakerOpenWaitMillis,
             String routeKey,
             int rateLimitBurst,
-            long rateLimitRefillMillis
+            long rateLimitRefillMillis,
+            String jwtHs256Secret
     ) {}
 }

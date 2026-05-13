@@ -26,6 +26,7 @@ public class GatewayRoutingProperties {
         private Long circuitBreakerOpenWaitMillis;
         private Integer rateLimitBurst;
         private Long rateLimitRefillMillis;
+        private String jwtHs256Secret;
 
         public String getPathPrefix() {
             return pathPrefix;
@@ -81,6 +82,14 @@ public class GatewayRoutingProperties {
 
         public void setRateLimitRefillMillis(Long rateLimitRefillMillis) {
             this.rateLimitRefillMillis = rateLimitRefillMillis;
+        }
+
+        public String getJwtHs256Secret() {
+            return jwtHs256Secret;
+        }
+
+        public void setJwtHs256Secret(String jwtHs256Secret) {
+            this.jwtHs256Secret = jwtHs256Secret;
         }
     }
 }
