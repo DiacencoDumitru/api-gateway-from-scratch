@@ -5,6 +5,8 @@ import com.dumitrudiacenco.apigatewayfromscratch.request.GatewayRequestAttribute
 import com.dumitrudiacenco.apigatewayfromscratch.routing.RouteResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -61,14 +63,17 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
     private final RestClient restClient;
     private final RouteResolver routeResolver;
     private final ObjectMapper objectMapper;
+    private final MeterRegistry meterRegistry;
 
     public UpstreamProxyFilter(
             @Qualifier(GatewayUpstreamRestClientConfiguration.GATEWAY_UPSTREAM_REST_CLIENT) RestClient restClient,
             RouteResolver routeResolver,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            MeterRegistry meterRegistry) {
         this.restClient = restClient;
         this.routeResolver = routeResolver;
         this.objectMapper = objectMapper;
+        this.meterRegistry = meterRegistry;
     }
 
     @Override
@@ -104,6 +109,7 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
     }
 
     private void proxy(HttpServletRequest request, HttpServletResponse response, URI upstream) throws IOException {
+        Timer.Sample sample = Timer.start(meterRegistry);
         Object requestId = request.getAttribute(GatewayRequestAttributes.REQUEST_ID);
         if (requestId instanceof String id && !id.isBlank()) {
             response.setHeader(GatewayRequestAttributes.REQUEST_ID_HEADER, id);
@@ -123,9 +129,24 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
                 entity = headersSpec.exchange((req, res) -> readEntity(res));
             }
             writeEntityResponse(response, entity, requestId);
+            recordProxyMetrics(method, entity.getStatusCode().value(), "upstream");
         } catch (RestClientException e) {
             writeUpstreamUnreachable(response, requestId);
+            recordProxyMetrics(method, HttpServletResponse.SC_BAD_GATEWAY, "unreachable");
+        } finally {
+            sample.stop(Timer.builder("gateway.proxy.request.duration")
+                    .tag("method", method.name())
+                    .register(meterRegistry));
         }
+    }
+
+    private void recordProxyMetrics(HttpMethod method, int statusCode, String outcome) {
+        meterRegistry.counter(
+                "gateway.proxy.requests",
+                "method", method.name(),
+                "status", Integer.toString(statusCode),
+                "outcome", outcome
+        ).increment();
     }
 
     private static ResponseEntity<byte[]> readEntity(ClientHttpResponse res) throws IOException {
