@@ -22,7 +22,16 @@ public final class RouteResolver {
                 String prefix = normalizePrefix(route.getPathPrefix());
                 String base = stripTrailingSlashes(route.getTargetBaseUrl());
                 int retryAttempts = route.getRetryAttempts() != null && route.getRetryAttempts() > 0 ? route.getRetryAttempts() : 1;
-                list.add(new ResolvedRoute(prefix, base, retryAttempts));
+                int failureThreshold =
+                        route.getCircuitBreakerFailureThreshold() != null && route.getCircuitBreakerFailureThreshold() > 0
+                                ? route.getCircuitBreakerFailureThreshold()
+                                : 0;
+                long openWaitMillis =
+                        route.getCircuitBreakerOpenWaitMillis() != null && route.getCircuitBreakerOpenWaitMillis() > 0
+                                ? route.getCircuitBreakerOpenWaitMillis()
+                                : 0L;
+                String routeKey = prefix + "|" + base;
+                list.add(new ResolvedRoute(prefix, base, retryAttempts, failureThreshold, openWaitMillis, routeKey));
             }
         }
         list.sort(Comparator.comparingInt(r -> -r.pathPrefix().length()));
@@ -39,7 +48,12 @@ public final class RouteResolver {
         for (ResolvedRoute route : resolvedRoutes) {
             Optional<String> remainder = matchRemainder(route.pathPrefix(), requestPath);
             if (remainder.isPresent()) {
-                return Optional.of(new RouteMatch(buildUpstreamUri(route.targetBaseUrl(), remainder.get()), route.retryAttempts()));
+                return Optional.of(new RouteMatch(
+                        buildUpstreamUri(route.targetBaseUrl(), remainder.get()),
+                        route.retryAttempts(),
+                        route.circuitBreakerFailureThreshold(),
+                        route.circuitBreakerOpenWaitMillis(),
+                        route.routeKey()));
             }
         }
         return Optional.empty();
@@ -85,5 +99,12 @@ public final class RouteResolver {
         return u;
     }
 
-    private record ResolvedRoute(String pathPrefix, String targetBaseUrl, int retryAttempts) {}
+    private record ResolvedRoute(
+            String pathPrefix,
+            String targetBaseUrl,
+            int retryAttempts,
+            int circuitBreakerFailureThreshold,
+            long circuitBreakerOpenWaitMillis,
+            String routeKey
+    ) {}
 }

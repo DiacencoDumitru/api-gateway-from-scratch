@@ -2,6 +2,8 @@ package com.dumitrudiacenco.apigatewayfromscratch.proxy;
 
 import com.dumitrudiacenco.apigatewayfromscratch.config.GatewayUpstreamRestClientConfiguration;
 import com.dumitrudiacenco.apigatewayfromscratch.request.GatewayRequestAttributes;
+import com.dumitrudiacenco.apigatewayfromscratch.resilience.RouteCircuitBreakers;
+import com.dumitrudiacenco.apigatewayfromscratch.routing.RouteMatch;
 import com.dumitrudiacenco.apigatewayfromscratch.routing.RouteResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -64,16 +66,19 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
     private final RouteResolver routeResolver;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
+    private final RouteCircuitBreakers circuitBreakers;
 
     public UpstreamProxyFilter(
             @Qualifier(GatewayUpstreamRestClientConfiguration.GATEWAY_UPSTREAM_REST_CLIENT) RestClient restClient,
             RouteResolver routeResolver,
             ObjectMapper objectMapper,
-            MeterRegistry meterRegistry) {
+            MeterRegistry meterRegistry,
+            RouteCircuitBreakers circuitBreakers) {
         this.restClient = restClient;
         this.routeResolver = routeResolver;
         this.objectMapper = objectMapper;
         this.meterRegistry = meterRegistry;
+        this.circuitBreakers = circuitBreakers;
     }
 
     @Override
@@ -85,8 +90,9 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
-        URI upstream = withQuery(match.get().upstreamUri(), request.getQueryString());
-        proxy(request, response, upstream, match.get().retryAttempts());
+        RouteMatch routeMatch = match.get();
+        URI upstream = withQuery(routeMatch.upstreamUri(), request.getQueryString());
+        proxy(request, response, upstream, routeMatch);
     }
 
     private static String requestPath(HttpServletRequest request) {
@@ -108,7 +114,8 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
         return URI.create(upstream.toASCIIString() + "?" + rawQuery);
     }
 
-    private void proxy(HttpServletRequest request, HttpServletResponse response, URI upstream, int retryAttempts) throws IOException {
+    private void proxy(HttpServletRequest request, HttpServletResponse response, URI upstream, RouteMatch routeMatch)
+            throws IOException {
         Timer.Sample sample = Timer.start(meterRegistry);
         Object requestId = request.getAttribute(GatewayRequestAttributes.REQUEST_ID);
         if (requestId instanceof String id && !id.isBlank()) {
@@ -116,11 +123,25 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
         }
 
         HttpMethod method = HttpMethod.valueOf(request.getMethod());
+        String routeKey = routeMatch.routeKey();
+        int failureThreshold = routeMatch.circuitBreakerFailureThreshold();
+        long openWaitMillis = routeMatch.circuitBreakerOpenWaitMillis();
+
+        if (!circuitBreakers.allowRequest(routeKey, failureThreshold, openWaitMillis)) {
+            writeCircuitOpen(response, requestId, openWaitMillis);
+            recordProxyMetrics(method, HttpServletResponse.SC_SERVICE_UNAVAILABLE, "circuit_open");
+            sample.stop(Timer.builder("gateway.proxy.request.duration")
+                    .tag("method", method.name())
+                    .register(meterRegistry));
+            return;
+        }
+
         byte[] body = request.getInputStream().readAllBytes();
 
         var uriSpec = restClient.method(method).uri(upstream);
         var headersSpec = uriSpec.headers(headers -> copyRequestHeaders(request, headers, upstream));
 
+        int retryAttempts = routeMatch.retryAttempts();
         int attempts = shouldRetry(method) ? Math.max(1, retryAttempts) : 1;
         RestClientException lastFailure = null;
         ResponseEntity<byte[]> entity = null;
@@ -146,9 +167,15 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
             if (entity != null) {
                 writeEntityResponse(response, entity, requestId);
                 recordProxyMetrics(method, entity.getStatusCode().value(), "upstream");
+                if (entity.getStatusCode().is5xxServerError()) {
+                    circuitBreakers.recordFailure(routeKey, failureThreshold, openWaitMillis);
+                } else {
+                    circuitBreakers.recordSuccess(routeKey, failureThreshold);
+                }
             } else if (lastFailure != null) {
                 writeUpstreamUnreachable(response, requestId);
                 recordProxyMetrics(method, HttpServletResponse.SC_BAD_GATEWAY, "unreachable");
+                circuitBreakers.recordFailure(routeKey, failureThreshold, openWaitMillis);
             }
         } finally {
             sample.stop(Timer.builder("gateway.proxy.request.duration")
@@ -205,6 +232,25 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("status", HttpServletResponse.SC_BAD_GATEWAY);
         root.put("error", "upstream_unreachable");
+        if (requestId instanceof String id && !id.isBlank()) {
+            root.put("requestId", id);
+        }
+        byte[] bytes = objectMapper.writeValueAsBytes(root);
+        response.getOutputStream().write(bytes);
+    }
+
+    private void writeCircuitOpen(HttpServletResponse response, Object requestId, long openWaitMillis) throws IOException {
+        response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        long retryAfterSeconds = Math.max(1L, (openWaitMillis + 999L) / 1000L);
+        response.setHeader(HttpHeaders.RETRY_AFTER, String.valueOf(retryAfterSeconds));
+        if (requestId instanceof String id && !id.isBlank()) {
+            response.setHeader(GatewayRequestAttributes.REQUEST_ID_HEADER, id);
+        }
+        ObjectNode root = objectMapper.createObjectNode();
+        root.put("status", HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+        root.put("error", "circuit_open");
+        root.put("retryAfterSeconds", retryAfterSeconds);
         if (requestId instanceof String id && !id.isBlank()) {
             root.put("requestId", id);
         }
