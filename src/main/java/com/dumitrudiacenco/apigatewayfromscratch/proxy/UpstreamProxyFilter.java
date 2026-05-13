@@ -5,8 +5,8 @@ import com.dumitrudiacenco.apigatewayfromscratch.request.GatewayRequestAttribute
 import com.dumitrudiacenco.apigatewayfromscratch.resilience.RouteCircuitBreakers;
 import com.dumitrudiacenco.apigatewayfromscratch.ratelimit.RouteTokenBuckets;
 import com.dumitrudiacenco.apigatewayfromscratch.ratelimit.RouteTokenBuckets.TryResult;
+import com.dumitrudiacenco.apigatewayfromscratch.routing.RefreshableRouteResolver;
 import com.dumitrudiacenco.apigatewayfromscratch.routing.RouteMatch;
-import com.dumitrudiacenco.apigatewayfromscratch.routing.RouteResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -66,7 +66,7 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
                     "x-request-id");
 
     private final RestClient restClient;
-    private final RouteResolver routeResolver;
+    private final RefreshableRouteResolver routeResolver;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
     private final RouteCircuitBreakers circuitBreakers;
@@ -74,7 +74,7 @@ public class UpstreamProxyFilter extends OncePerRequestFilter {
 
     public UpstreamProxyFilter(
             @Qualifier(GatewayUpstreamRestClientConfiguration.GATEWAY_UPSTREAM_REST_CLIENT) RestClient restClient,
-            RouteResolver routeResolver,
+            RefreshableRouteResolver routeResolver,
             ObjectMapper objectMapper,
             MeterRegistry meterRegistry,
             RouteCircuitBreakers circuitBreakers,
